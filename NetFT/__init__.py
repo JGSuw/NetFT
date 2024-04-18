@@ -1,7 +1,12 @@
 import socket
+import select
 import struct
 from threading import Thread
 from time import sleep
+
+class SensorTimeout(BaseException):
+	def __init__(self):
+		pass # timeout thrown when select times out
 
 class Sensor:
 	'''The class interface for an ATI Force/Torque sensor.
@@ -10,7 +15,7 @@ class Sensor:
 	with an ATI Force/Torque sensor with a Net F/T interface
 	using RDT.
 	'''
-	def __init__(self, ip):
+	def __init__(self, ip, timeout):
 		'''Start the sensor interface
 
 		This function initializes the class and opens the socket for the
@@ -21,6 +26,7 @@ class Sensor:
 		'''
 		self.ip = ip
 		self.port = 49152
+		self.timeout = timeout
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 		self.sock.connect((ip, self.port))
 		self.mean = [0] * 6
@@ -51,10 +57,14 @@ class Sensor:
 				values are the forces recorded, and the last three are the measured
 				torques.
 		'''
-		rawdata = self.sock.recv(1024)
-		data = struct.unpack('!IIIiiiiii', rawdata)[3:]
-		self.data = [data[i] - self.mean[i] for i in range(6)]
-		return self.data
+		ready = select.select([self.sock], [], [], self.timeout)
+		if ready[0]:
+			rawdata = self.sock.recv(1024)
+			data = struct.unpack('!IIIiiiiii', rawdata)[3:]
+			self.data = [data[i] - self.mean[i] for i in range(6)]
+			return self.data
+		else:
+			raise SensorTimeout()
 
 	def tare(self, n = 10):
 		'''Tare the sensor.
